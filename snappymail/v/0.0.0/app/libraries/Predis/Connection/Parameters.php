@@ -26,7 +26,6 @@ class Parameters implements ParametersInterface
         'scheme' => 'tcp',
         'host' => '127.0.0.1',
         'port' => 6379,
-        'timeout' => 5.0,
     );
 
     /**
@@ -74,7 +73,7 @@ class Parameters implements ParametersInterface
      * "password" and "database" if they are present in the "query" part.
      *
      * @link http://www.iana.org/assignments/uri-schemes/prov/redis
-     * @link http://www.iana.org/assignments/uri-schemes/prov/redis
+     * @link http://www.iana.org/assignments/uri-schemes/prov/rediss
      *
      * @param string $uri URI string.
      *
@@ -84,9 +83,10 @@ class Parameters implements ParametersInterface
      */
     public static function parse($uri)
     {
-        if (stripos($uri, 'unix') === 0) {
-            // Hack to support URIs for UNIX sockets with minimal effort.
-            $uri = str_ireplace('unix:///', 'unix://localhost/', $uri);
+        if (stripos($uri, 'unix://') === 0) {
+            // parse_url() can parse unix:/path/to/sock so we do not need the
+            // unix:///path/to/sock hack, we will support it anyway until 2.0.
+            $uri = str_ireplace('unix://', 'unix:', $uri);
         }
 
         if (!$parsed = parse_url($uri)) {
@@ -109,8 +109,17 @@ class Parameters implements ParametersInterface
         }
 
         if (stripos($uri, 'redis') === 0) {
+            if (isset($parsed['user'])) {
+                if (strlen($parsed['user'])) {
+                    $parsed['username'] = $parsed['user'];
+                }
+                unset($parsed['user']);
+            }
+
             if (isset($parsed['pass'])) {
-                $parsed['password'] = $parsed['pass'];
+                if (strlen($parsed['pass'])) {
+                    $parsed['password'] = $parsed['pass'];
+                }
                 unset($parsed['pass']);
             }
 

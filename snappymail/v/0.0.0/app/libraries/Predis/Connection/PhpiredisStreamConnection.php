@@ -67,9 +67,19 @@ class PhpiredisStreamConnection extends StreamConnection
      */
     public function __destruct()
     {
-        phpiredis_reader_destroy($this->reader);
-
         parent::__destruct();
+
+        phpiredis_reader_destroy($this->reader);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function disconnect()
+    {
+        phpiredis_reader_reset($this->reader);
+
+        parent::disconnect();
     }
 
     /**
@@ -87,22 +97,34 @@ class PhpiredisStreamConnection extends StreamConnection
     /**
      * {@inheritdoc}
      */
-    protected function tcpStreamInitializer(ParametersInterface $parameters)
+    protected function assertParameters(ParametersInterface $parameters)
     {
-        $uri = "tcp://[{$parameters->host}]:{$parameters->port}";
-        $flags = STREAM_CLIENT_CONNECT;
+        switch ($parameters->scheme) {
+            case 'tcp':
+            case 'redis':
+            case 'unix':
+                break;
+
+            case 'tls':
+            case 'rediss':
+                throw new \InvalidArgumentException('SSL encryption is not supported by this connection backend.');
+
+            default:
+                throw new \InvalidArgumentException("Invalid scheme: '$parameters->scheme'.");
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function createStreamSocket(ParametersInterface $parameters, $address, $flags, $context = null)
+    {
         $socket = null;
+        $timeout = (isset($parameters->timeout) ? (float) $parameters->timeout : 5.0);
 
-        if (isset($parameters->async_connect) && (bool) $parameters->async_connect) {
-            $flags |= STREAM_CLIENT_ASYNC_CONNECT;
-        }
-
-        if (isset($parameters->persistent) && (bool) $parameters->persistent) {
-            $flags |= STREAM_CLIENT_PERSISTENT;
-            $uri .= strpos($path = $parameters->path, '/') === 0 ? $path : "/$path";
-        }
-
-        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
+        $resource = @stream_socket_client($address, $errno, $errstr, $timeout, $flags);
 
         if (!$resource) {
             $this->onConnectionError(trim($errstr), $errno);
@@ -162,9 +184,15 @@ class PhpiredisStreamConnection extends StreamConnection
      */
     protected function getStatusHandler()
     {
-        return function ($payload) {
-            return StatusResponse::get($payload);
-        };
+        static $statusHandler;
+
+        if (!$statusHandler) {
+            $statusHandler = function ($payload) {
+                return StatusResponse::get($payload);
+            };
+        }
+
+        return $statusHandler;
     }
 
     /**
@@ -174,9 +202,15 @@ class PhpiredisStreamConnection extends StreamConnection
      */
     protected function getErrorHandler()
     {
-        return function ($errorMessage) {
-            return new ErrorResponse($errorMessage);
-        };
+        static $errorHandler;
+
+        if (!$errorHandler) {
+            $errorHandler = function ($errorMessage) {
+                return new ErrorResponse($errorMessage);
+            };
+        }
+
+        return $errorHandler;
     }
 
     /**
